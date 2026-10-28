@@ -1,0 +1,29 @@
+# 目标芯片
+CONFIG_IDF_TARGET="esp32p4"
+
+# PSRAM：framebuffer + LVGL 绘制缓冲，540x810x3 就要 1.3MB
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_HEX=y
+CONFIG_SPIRAM_SPEED_200M=y
+
+# MIPI DSI 在 v5.5 里仍属实验特性
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_FREERTOS_HZ=1000
+
+# 自定义分区表：带 LVGL 的镜像约 1.2MB，默认 single-app 的 1MB factory 装不下
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ---- LVGL 9.2.2 ----
+# 24bit，与 panel 的 in_color_format = RGB888 对应
+CONFIG_LV_COLOR_DEPTH_24=y
+# 用 libc malloc，LVGL 从 esp 堆分配（先内部，大块自动落 PSRAM）
+CONFIG_LV_USE_CLIB_MALLOC=y
+# lv_demo_music 需要这两个字号
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_USE_DEMO_MUSIC=y
+# 关掉自动演示：开着的话约 60 秒后 demo 会切到一个空白屏，看起来像"卡住了"
+# CONFIG_LV_DEMO_MUSIC_AUTO_PLAY is not set

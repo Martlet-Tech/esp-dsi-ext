@@ -1,4 +1,4 @@
-version: "0.1.0"
+version: "0.2.0"
 description: "ESP32-P4 MIPI DSI extensions: arbitrary data-type commands, real read path, VPG patterns, framebuffer direct write — without patching ESP-IDF"
 url: "https://github.com/Martlet-Tech/esp-dsi-ext"
 repository: "https://github.com/Martlet-Tech/esp-dsi-ext.git"

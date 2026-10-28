@@ -1,0 +1,8 @@
+﻿# 自定义分区表：带 LVGL 的镜像约 1.2MB，默认 single-app 的 1MB factory 装不下。
+# 这里按"flash 只有 2MB"的最保守假设排，factory 到 2MB 边界。
+# 如果你的板子有 4MB / 8MB flash，把 factory 的 size 改大即可（同时改
+# sdkconfig.defaults 里的 CONFIG_ESPTOOLPY_FLASHSIZE）。
+# Name,   Type, SubType, Offset,  Size, Flags
+nvs,      data, nvs,     0x9000,   0x6000,
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x1F0000,

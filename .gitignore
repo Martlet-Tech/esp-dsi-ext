@@ -6,3 +6,8 @@ sdkconfig.old
 .vscode/
 .DS_Store
 dist/
+
+# 例程的构建产物。dependencies.lock 不入库：例程依赖的是 ^0.2.0 这种浮动版本，
+# 锁文件会把具体 hash 钉死，对外部使用者反而是负担。
+managed_components/
+dependencies.lock

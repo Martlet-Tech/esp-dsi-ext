@@ -31,27 +31,65 @@ ESP-IDF 的 `esp_lcd` 只覆盖"正常路径"：DPI 面板 + DCS 命令 + 固定
 
 ## 安装
 
-**方式一：组件管理器（git）** —— 在工程的 `main/idf_component.yml` 里加：
+**方式一：组件注册表（推荐）**
 
 ```yaml
 dependencies:
-  esp_dsi_ext:
+  martlet-tech/esp_dsi_ext: "^0.2.0"
+```
+
+**方式二：git 依赖**（想跟主分支走，或注册表访问不了时）
+
+```yaml
+dependencies:
+  martlet-tech/esp_dsi_ext:
     git: https://github.com/Martlet-Tech/esp-dsi-ext.git
 ```
 
-**方式二：本地路径**
+**方式三：本地路径**
 
 ```yaml
 dependencies:
-  esp_dsi_ext:
+  martlet-tech/esp_dsi_ext:
     path: ../../esp-dsi-ext
 ```
 
-**方式三：直接放工程里** —— 把本仓库放到工程的 `components/esp_dsi_ext/` 下即可
-（目录名要用下划线），CMake 会自动发现。
+**方式四：直接放工程里** —— 把本仓库放到工程的 `components/esp_dsi_ext/` 下，
+main 里 `REQUIRES esp_dsi_ext` 即可。
 
 > 只对 `SOC_MIPI_DSI_SUPPORTED` 的芯片有效（ESP32-P4 及同族）。其它 target 会编译成
 > 返回 `ESP_ERR_NOT_SUPPORTED` 的 stub，可以安全地放在多目标工程里。
+
+---
+
+## 例程
+
+两个都能单独拷出去 `idf.py build`（自包含，不依赖仓库里的其他文件）。
+
+| 例程 | 用途 |
+|---|---|
+| [`examples/bringup_minimal`](examples/bringup_minimal) | **点亮一块新屏的最小骨架。** 不接 LVGL，只有 screen 一层：上电 / 复位 / DSI / 初始化表 / video mode / 纯色轮播。三个文件改完就是你的屏。 |
+| [`examples/incell_540x810_2lane`](examples/incell_540x810_2lane) | **完整参考。** 显示 + 触摸 + LVGL music demo，含一套实测可用的参数（porch / lane / DPI / LDO）。 |
+
+两个例程共用同一套骨架，这个骨架也是推荐的项目组织方式：
+
+```
+main/
+├── board_config.h     引脚 / 电源 / 背光 / 触摸引脚      ← 换板子只改这里
+├── panel_timing.h     分辨率 / porch / lane / DPI / 格式  ← 唯一事实源
+├── panel_init.c/h     初始化命令表（生成物，勿手改）
+├── screen.c/h         显示：init / backlight / fill / vpg / panel
+├── touch.c/h          触摸：init / touch_read / stats
+├── lv_port.c/h        LVGL：display / indev / tick / 任务
+└── app_main.c         只做组装
+```
+
+约束：
+
+- `screen.h` 和 `touch.h` **都不 include `lvgl.h`**，彼此也不互相 include
+- 只有 `lv_port` 同时认识两边 —— 它是胶水层，这是设计
+- `app_main` 只按顺序调用上面几个模块，不碰任何 hal / 寄存器头
+- 引脚只在 `board_config.h`，时序只在 `panel_timing.h` —— 别在 `screen.c` 里写死数字
 
 ---
 

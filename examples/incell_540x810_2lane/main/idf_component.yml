@@ -1,0 +1,18 @@
+## 本组件自己 + LVGL。
+##
+## 本地改完组件、还没发布新版本时，把 esp_dsi_ext 换成 override_path 形式：
+##
+##   martlet-tech/esp_dsi_ext:
+##     version: "*"
+##     override_path: "../../../"
+##
+## 注意：override_path 指向的目录名必须等于 `<namespace>__<name>`
+## （IDF 用目录名当组件名）。仓库根目录叫 esp-dsi-ext，对不上
+## martlet-tech__esp_dsi_ext，所以本地调试通常是把组件源码拷到一个
+## 叫 martlet-tech__esp_dsi_ext 的临时目录再指过去。
+##
+## 提交前记得换回来 —— override_path 指向例程目录之外，违反"例程自包含"。
+dependencies:
+  idf: ">=5.5"
+  martlet-tech/esp_dsi_ext: "^0.2.0"
+  lvgl/lvgl: "9.2.2"

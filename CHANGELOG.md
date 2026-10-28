@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0 — 2026-10-28
+
+### 新增：两个例程
+
+- `examples/bringup_minimal` — 点亮一块新屏的最小骨架。不接 LVGL，
+  只有 `screen` 一层：上电/复位/DSI/初始化表/video mode/纯色轮播。
+  三个文件改完就是你的屏（`board_config.h` / `panel_timing.h` / `panel_init.c`）。
+- `examples/incell_540x810_2lane` — 完整参考：显示 + 触摸 + LVGL music demo。
+  演示分层写法（`screen` / `touch` / `lv_port` 互不知道对方，只有 `lv_port` 是胶水），
+  以及一组实测可用的参数（porch / lane / DPI / LDO）。
+
+两个例程都自包含，可以单独拷出去 `idf.py build`。
+
+### 组件本体
+
+无接口变更，功能与 0.1.0 相同。
+
 ## 0.1.0 — 2026-10-28
 
 首个版本。全部能力都不修改 ESP-IDF，只在自己的编译单元里包含 `hal` 的私有 inline 接口。
