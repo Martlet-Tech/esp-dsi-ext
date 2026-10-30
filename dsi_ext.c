@@ -80,7 +80,19 @@ void *dsi_ext_host(void)
 	return s_host;
 }
 
-esp_err_t dsi_ext_cmd_channel_config(bool cmd_ack, bool te_ack, bool all_lp)
+static void set_all_wr_speed(dsi_host_dev_t *host, mipi_dsi_ll_trans_speed_mode_t speed)
+{
+	mipi_dsi_host_ll_set_dcs_short_wr_speed_mode(host, 0, speed);
+	mipi_dsi_host_ll_set_dcs_short_wr_speed_mode(host, 1, speed);
+	mipi_dsi_host_ll_set_dcs_long_wr_speed_mode(host, speed);
+	mipi_dsi_host_ll_set_gen_short_wr_speed_mode(host, 0, speed);
+	mipi_dsi_host_ll_set_gen_short_wr_speed_mode(host, 1, speed);
+	mipi_dsi_host_ll_set_gen_short_wr_speed_mode(host, 2, speed);
+	mipi_dsi_host_ll_set_gen_long_wr_speed_mode(host, speed);
+}
+
+esp_err_t dsi_ext_cmd_channel_config(bool cmd_ack, bool te_ack,
+				     dsi_ext_wr_speed_t wr_speed)
 {
 	if (s_host == NULL) {
 		return ESP_ERR_INVALID_STATE;
@@ -89,24 +101,31 @@ esp_err_t dsi_ext_cmd_channel_config(bool cmd_ack, bool te_ack, bool all_lp)
 	mipi_dsi_host_ll_enable_cmd_ack(s_host, cmd_ack);
 	mipi_dsi_host_ll_enable_te_ack(s_host, te_ack);
 
-	if (all_lp) {
-		mipi_dsi_host_ll_set_dcs_short_wr_speed_mode(s_host, 0, MIPI_DSI_LL_TRANS_SPEED_LP);
-		mipi_dsi_host_ll_set_dcs_short_wr_speed_mode(s_host, 1, MIPI_DSI_LL_TRANS_SPEED_LP);
-		mipi_dsi_host_ll_set_dcs_long_wr_speed_mode(s_host, MIPI_DSI_LL_TRANS_SPEED_LP);
-		mipi_dsi_host_ll_set_gen_short_wr_speed_mode(s_host, 0, MIPI_DSI_LL_TRANS_SPEED_LP);
-		mipi_dsi_host_ll_set_gen_short_wr_speed_mode(s_host, 1, MIPI_DSI_LL_TRANS_SPEED_LP);
-		mipi_dsi_host_ll_set_gen_short_wr_speed_mode(s_host, 2, MIPI_DSI_LL_TRANS_SPEED_LP);
-		mipi_dsi_host_ll_set_gen_long_wr_speed_mode(s_host, MIPI_DSI_LL_TRANS_SPEED_LP);
-	} else {
-		mipi_dsi_host_ll_set_dcs_short_wr_speed_mode(s_host, 0, MIPI_DSI_LL_TRANS_SPEED_HS);
-		mipi_dsi_host_ll_set_dcs_short_wr_speed_mode(s_host, 1, MIPI_DSI_LL_TRANS_SPEED_HS);
-		mipi_dsi_host_ll_set_dcs_long_wr_speed_mode(s_host, MIPI_DSI_LL_TRANS_SPEED_HS);
-		mipi_dsi_host_ll_set_gen_short_wr_speed_mode(s_host, 0, MIPI_DSI_LL_TRANS_SPEED_HS);
-		mipi_dsi_host_ll_set_gen_short_wr_speed_mode(s_host, 1, MIPI_DSI_LL_TRANS_SPEED_HS);
-		mipi_dsi_host_ll_set_gen_short_wr_speed_mode(s_host, 2, MIPI_DSI_LL_TRANS_SPEED_HS);
-		mipi_dsi_host_ll_set_gen_long_wr_speed_mode(s_host, MIPI_DSI_LL_TRANS_SPEED_HS);
+	switch (wr_speed) {
+	case DSI_EXT_WR_SPEED_KEEP:
+		/* 一个都不改 —— 保留调用前(通常是 IDF 设的 LP)的值 */
+		break;
+	case DSI_EXT_WR_SPEED_LP:
+		set_all_wr_speed(s_host, MIPI_DSI_LL_TRANS_SPEED_LP);
+		break;
+	case DSI_EXT_WR_SPEED_HS:
+		set_all_wr_speed(s_host, MIPI_DSI_LL_TRANS_SPEED_HS);
+		break;
+	default:
+		ESP_LOGE(TAG, "未知的写速度 %d", (int)wr_speed);
+		return ESP_ERR_INVALID_ARG;
 	}
 
+	return ESP_OK;
+}
+
+esp_err_t dsi_ext_disable_cmd_ack(void)
+{
+	if (s_host == NULL) {
+		return ESP_ERR_INVALID_STATE;
+	}
+	/* 只关 ACK; 写速度保持 IDF 设好的 LP, 一个位都不碰 */
+	mipi_dsi_host_ll_enable_cmd_ack(s_host, false);
 	return ESP_OK;
 }
 
@@ -166,6 +185,40 @@ esp_err_t dsi_ext_set_clock_lane(bool force_hs)
 	mipi_dsi_host_ll_set_clock_lane_state(s_host,
 			force_hs ? MIPI_DSI_LL_CLOCK_LANE_STATE_HS
 				 : MIPI_DSI_LL_CLOCK_LANE_STATE_AUTO);
+	return ESP_OK;
+}
+
+esp_err_t dsi_ext_disable_lp_all(void)
+{
+	if (s_host == NULL) {
+		return ESP_ERR_INVALID_STATE;
+	}
+	/* 三段全关: 行消隐 (HBP/HFP) / 场消隐 (VSYNC/VBP/VFP/VACT) / 命令通道。
+	 * 与 IDF 默认行为相反 —— IDF 在 dpi_panel_init() 里把这几段全开成回 LP。 */
+	mipi_dsi_host_ll_dpi_enable_lp_horizontal_timing(s_host, false, false);
+	mipi_dsi_host_ll_dpi_enable_lp_vertical_timing(s_host, false, false, false, false);
+	mipi_dsi_host_ll_dpi_enable_lp_command(s_host, false);
+	return ESP_OK;
+}
+
+esp_err_t dsi_ext_enable_lp_all(void)
+{
+	if (s_host == NULL) {
+		return ESP_ERR_INVALID_STATE;
+	}
+	/* 恢复 IDF 默认: 各段都允许回 LP。 */
+	mipi_dsi_host_ll_dpi_enable_lp_horizontal_timing(s_host, true, true);
+	mipi_dsi_host_ll_dpi_enable_lp_vertical_timing(s_host, true, true, true, true);
+	mipi_dsi_host_ll_dpi_enable_lp_command(s_host, true);
+	return ESP_OK;
+}
+
+esp_err_t dsi_ext_disable_frame_ack(void)
+{
+	if (s_host == NULL) {
+		return ESP_ERR_INVALID_STATE;
+	}
+	mipi_dsi_host_ll_dpi_enable_frame_ack(s_host, false);
 	return ESP_OK;
 }
 
@@ -433,9 +486,13 @@ uint32_t dsi_ext_timeout_count(void)
 
 esp_err_t dsi_ext_init(int port) { (void)port; return ESP_ERR_NOT_SUPPORTED; }
 void *dsi_ext_host(void) { return NULL; }
-esp_err_t dsi_ext_cmd_channel_config(bool a, bool b, bool c) { (void)a; (void)b; (void)c; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t dsi_ext_cmd_channel_config(bool a, bool b, dsi_ext_wr_speed_t c) { (void)a; (void)b; (void)c; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t dsi_ext_disable_cmd_ack(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t dsi_ext_tx(uint8_t vc, uint8_t dt, const uint8_t *d, uint16_t n) { (void)vc; (void)dt; (void)d; (void)n; return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t dsi_ext_set_clock_lane(bool hs) { (void)hs; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t dsi_ext_disable_lp_all(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t dsi_ext_enable_lp_all(void) { return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t dsi_ext_disable_frame_ack(void) { return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t dsi_ext_set_timing_polarity(bool a, bool b, bool c, bool d, bool e) { (void)a; (void)b; (void)c; (void)d; (void)e; return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t dsi_ext_set_pixel_type(uint8_t r, uint8_t c) { (void)r; (void)c; return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t dsi_ext_rx(uint8_t vc, uint8_t dt, const uint8_t *r, uint8_t rl, void *b, uint16_t n, uint32_t t, uint16_t *a)

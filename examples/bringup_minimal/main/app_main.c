@@ -47,6 +47,15 @@ void app_main(void)
 {
     ESP_LOGW(TAG, "==== bringup_minimal ====");
 
+    /* ---- 上电 ---- */
+    ESP_ERROR_CHECK(screen_power_on());
+
+    /* ---- LCD 复位，摆在 main 里一眼可见 ----
+     * 复位故意不藏在 screen_init() 里：复位时机/脉宽/前后延时都是板级与
+     * IC 级的事，换屏只改这里。详见 screen.h。 */
+    screen_reset();
+
+    /* ---- DSI + 初始化表 + video mode（不含复位） ---- */
     esp_err_t err = screen_init();
     if (err != ESP_OK) {
         /* 不 ESP_ERROR_CHECK：初始化失败时停在这里，日志已经说明了哪一步，

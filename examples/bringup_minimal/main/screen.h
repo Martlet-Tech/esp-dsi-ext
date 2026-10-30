@@ -28,20 +28,40 @@
 esp_err_t screen_power_on(void);
 
 /**
- * @brief 完整上电 + 初始化 + 启动出图
+ * @brief LCD 复位（H → L → H），由 app_main 调用
+ *
+ * **为什么单独暴露，而不放在 screen_init() 里：**
+ *
+ *   - 复位时机和顺序是板级/IC 级的事。有些 IC 要求在复位前后插延时，
+ *     有些要求复位信号与某路电源的先后关系。写在 app_main 里一眼能看见；
+ *     藏进模块内部，读代码的人得翻两个文件才知道。
+ *   - 调试时经常需要单独重放复位（看面板是不是真的被复位了）。
+ *   - 重建链路时（screen_destroy → screen_init）需要调用方决定要不要补一次复位。
+ *
+ * screen_init() **不会**调用本函数。上电流程由 app_main 显式编排：
+ *
+ *     screen_power_on();
+ *     screen_reset();     // LCD 复位
+ *     screen_init();      // DSI + 初始化表 + video mode
+ *
+ * 如果某块屏的上电时序不同，改 app_main 的调用顺序即可，不用动模块。
+ */
+void screen_reset(void);
+
+/**
+ * @brief 初始化 + 启动出图（**不含复位**）
  *
  * 顺序（每一步失败都会返回错误，不会静默继续）：
  *   1. LCD 电源（若配置了引脚）      ← 若已 screen_power_on() 则跳过
  *   2. MIPI 模拟开关（若配置了）
  *   3. DPHY LDO
  *   4. 背光关（避免在没出图时闪白）
- *   5. LCD 复位
- *   6. DSI 总线
- *   7. 命令通道：ACK 关、写命令走 LP
- *   8. DPI 面板对象（此时还没出图）
- *   9. 发初始化表
- *  10. esp_lcd_panel_init() → video mode 启动
- *  11. 分配 framebuffer（PSRAM）
+ *   5. DSI 总线
+ *   6. 命令通道：ACK 关、写命令走 LP
+ *   7. DPI 面板对象（此时还没出图）
+ *   8. 发初始化表
+ *   9. esp_lcd_panel_init() → video mode 启动
+ *  10. 分配 framebuffer（PSRAM）
  *
  * 返回后屏幕已经在扫描，但背光还关着 —— 调 screen_backlight(true) 点亮。
  * 这样"出图"和"亮灯"分开，出图失败时屏幕不会先闪一片白。

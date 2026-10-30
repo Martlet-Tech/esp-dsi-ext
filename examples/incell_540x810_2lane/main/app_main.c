@@ -8,12 +8,18 @@
  *
  *   screen_power_on()   上电（电源、MIPI 开关、DPHY LDO、背光关）
  *   touch_early_pins()  触摸三脚进高阻，让模组上拉决定总线电平
- *   screen_init()       复位 + DSI + 初始化表 + video mode
- *   touch_init()        触摸复位 + I2C + INT 任务（必须在显示初始化之后）
+ *   screen_reset()      LCD 复位 H → L → H
+ *   touch_reset()       TP 复位 H → L → H（必须在 LCD 复位之后）
+ *   screen_init()       DSI + 初始化表 + video mode（不含复位）
+ *   touch_init()        I2C + INT + 读点任务（不含复位，必须在显示初始化之后）
  *   lv_port_init()      LVGL：显示 + 输入 + 节拍
  *   lv_demo_music()     LVGL 自带 demo
  *   lv_port_start()     起 LVGL 任务
  *   screen_backlight()  最后点灯
+ *
+ * ★ 两个复位故意做成独立接口、摆在 app_main 里，而不是藏进 screen_init() /
+ *   touch_init()。原因：复位时机和顺序是板级/IC 级的事，写在这里一眼可见；
+ *   调试时能单独重放某一路；换 IC 只改这里，不动模块。详见 screen.h / touch.h。
  *
  * 每一步的顺序都有理由，改之前先看对应模块的注释。
  */
@@ -54,7 +60,22 @@ void app_main(void)
      * 从给电到显示初始化完成这段（含两次复位）里，P4 侧对触摸总线必须透明。 */
     touch_early_pins();
 
-    /* ---- 3) 屏幕 ---- */
+    /* ---- 3) 两个复位，顺序在这里一眼可见 ----
+     *
+     * 复位故意不藏在 screen_init() / touch_init() 里，而是摆在这里：
+     *
+     *   - incell TDDI 要求 TP 复位在 LCD 复位**之后**（同 die，复位 TP 等于
+     *     复位整颗芯片的触摸部分）。写在这里，顺序错了立刻能看出来。
+     *   - 调试时经常只重放某一路复位；不同 IC 的上电时序要求也不同
+     *     （RESX 与 IOVCC 的先后、复位脉宽、复位后等待时间）。
+     *     这些差异都改在这里，不用动模块。
+     */
+    screen_reset();                          /* LCD 复位  H → L → H */
+    vTaskDelay(pdMS_TO_TICKS(100));          /* 面板内部稳压稳定 */
+
+    touch_reset();                           /* TP 复位   H → L → H（必须在 LCD 之后） */
+
+    /* ---- 4) 屏幕：DSI + 初始化表 + video mode（不含复位） ---- */
     esp_err_t err = screen_init();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "screen_init 失败: %s —— 停在这里，看上面最后一条日志",
@@ -63,7 +84,7 @@ void app_main(void)
     }
     ESP_LOGW(TAG, "screen OK: %ux%u", screen_width(), screen_height());
 
-    /* ---- 4) VPG 自检（可选） ---- */
+    /* ---- 5) VPG 自检（可选） ---- */
 #if VPG_BOOT_TEST
     /* 图案由 host 内部生成，不经 framebuffer —— 能快速判断"面板/时序是否活"。
      * 注意它也要过 host 的打包器，所以"彩条正常"不代表颜色一定对。 */

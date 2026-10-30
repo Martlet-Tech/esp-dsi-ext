@@ -93,7 +93,9 @@ static void gpio_setup(void)
     ESP_ERROR_CHECK(gpio_config(&in_cfg));
 }
 
-static void hw_reset(void)
+/* 复位做成公开接口，由 app_main 调用 —— 见 touch.h 的说明。
+ * touch_init() 内部**不再**调它。 */
+void touch_reset(void)
 {
     ESP_LOGI(TAG, "TP reset (GPIO%d) H10-L20-H300", BOARD_TP_RST_GPIO);
     gpio_set_level(BOARD_TP_RST_GPIO, 1);
@@ -202,8 +204,8 @@ static void touch_task(void *arg)
 
 esp_err_t touch_init(void)
 {
+    /* 复位不在这里做 —— 由 app_main 调 touch_reset()。原因见 touch.h。 */
     gpio_setup();
-    hw_reset();
 
     i2c_master_bus_config_t bus_cfg = {
         .i2c_port = I2C_NUM_0,

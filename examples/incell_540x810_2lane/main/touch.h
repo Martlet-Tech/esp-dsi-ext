@@ -35,7 +35,22 @@
 void touch_early_pins(void);
 
 /**
- * @brief 初始化触摸：复位 + I2C + 挂 INT + 起读取任务
+ * @brief TP 硬件复位（H → L → H，末尾等 300ms 让固件启动），由 app_main 调用
+ *
+ * **为什么单独暴露，而不放在 touch_init() 里：**
+ *
+ *   - incell 屏触摸与显示同 die，`touch_reset()` 必须在 `screen_reset()` **之后**。
+ *     这个顺序写在 app_main 里一眼可见；藏进两个模块内部就要翻代码才知道。
+ *   - 调试时经常只重放 TP 复位（看 INT 有没有恢复），需要能单独调。
+ *   - 不同 IC 的上电时序要求不同（有的要 RESX 先于 IOVCC 拉高、有的要更长延时），
+ *     这些差异应该体现在 app_main 的编排里，而不是硬编码进 touch 模块。
+ *
+ * touch_init() **不会**调用本函数。
+ */
+void touch_reset(void);
+
+/**
+ * @brief 初始化触摸：I2C + 挂 INT + 起读取任务（**不含复位**）
  *
  * ★ 必须在显示初始化**完成之后**调用，并且与 LCD 发 11h/29h 间隔 >100ms。
  *   原厂资料明确要求：incell 屏的触摸与显示同一颗 die，显示没初始化完就

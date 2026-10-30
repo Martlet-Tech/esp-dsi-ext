@@ -100,13 +100,15 @@ esp_err_t screen_power_on(void)
     return ESP_OK;
 }
 
-static void board_reset(void)
+/* 复位做成公开接口，由 app_main 调用 —— 见 screen.h 的说明。
+ * screen_init() 内部**不再**调它，保证调用点唯一、可见。 */
+void screen_reset(void)
 {
     if (BOARD_LCD_RST_GPIO < 0) {
-        ESP_LOGW(TAG, "[2] 未配置复位脚 (BOARD_LCD_RST_GPIO=-1)，跳过");
+        ESP_LOGW(TAG, "未配置复位脚 (BOARD_LCD_RST_GPIO=-1)，跳过");
         return;
     }
-    ESP_LOGI(TAG, "[2] LCD reset (GPIO%d) H/L%dms/H%ddms",
+    ESP_LOGI(TAG, "LCD reset (GPIO%d) H/L%dms/H%ddms",
              BOARD_LCD_RST_GPIO, BOARD_RESET_LOW_MS, BOARD_RESET_AFTER_MS);
 
     gpio_out(BOARD_LCD_RST_GPIO, 1);
@@ -175,8 +177,9 @@ static void read_rddpm(void)
 
 esp_err_t screen_init(void)
 {
+    /* 复位不在这里做 —— 由 app_main 调 screen_reset()。
+     * 原因见 screen.h：复位时机和顺序是板级/IC 级的事，藏在模块内部就不可见了。 */
     ESP_RETURN_ON_ERROR(screen_power_on(), TAG, "power on");
-    board_reset();
 
     /* ---- DSI 总线 ---- */
     esp_lcd_dsi_bus_config_t bus_cfg = {
@@ -195,7 +198,9 @@ esp_err_t screen_init(void)
      *                    面板不回 ACK 就永久等总线转向，task_wdt。
      *   写命令走 LP   —— 便宜的 TDDI 通常只实现 LP 命令入口。 */
     ESP_RETURN_ON_ERROR(dsi_ext_init(0), TAG, "dsi_ext_init");
-    ESP_RETURN_ON_ERROR(dsi_ext_cmd_channel_config(false, false, true), TAG, "cmd channel");
+    ESP_RETURN_ON_ERROR(dsi_ext_cmd_channel_config(false, false,
+                                                   DSI_EXT_WR_SPEED_LP),
+                        TAG, "cmd channel");
     ESP_LOGI(TAG, "[4] cmd_ack=OFF, 写命令走 LP");
 
     /* 读请求的速度和写是**分开的两位**，IDF 从不设，复位值是 HS。

@@ -56,6 +56,42 @@ void *dsi_ext_host(void);
 /* ---------------- 命令通道 ---------------- */
 
 /**
+ * @brief 写命令的传输速度 (对应 DSI_HOST_CMD_MODE_CFG 里各类写数据包的 LP/HS 位)
+ *
+ * ★ 这个枚举存在的唯一原因, 是旧版 `dsi_ext_cmd_channel_config()` 的第三个参数
+ *   是 bool `all_lp`, 文档写的是 "false = 保持 IDF 默认", 但实现里 false 走的是
+ *   **改成 HS** 的分支。也就是说文档和实现不一致, 而且 bool 表达不了三态:
+ *
+ *       想做的事                      | 旧 bool 参数能表达吗
+ *       ------------------------------|---------------------
+ *       保持 IDF 默认 (全 LP)         | true (但语义不明)
+ *       全部改成 HS                   | false (但文档说是"保持默认")
+ *       只改其中某一类                | 不能
+ *
+ *   实际踩坑记录: YTS295KLAB 归一化时按文档传了 false, 写命令从 LP 翻成 HS,
+ *   面板只认 LP 命令入口 -> 收不到 -> 不回 BTA -> gen_rd_cmd_busy 卡住 ->
+ *   命令 FIFO 永久满 -> `cmd #19 0x11 FAILED: ESP_ERR_TIMEOUT`。
+ *   前 18 条"成功"是假象: dsi_ext_tx() 只要 header 进了 FIFO 就返回 OK。
+ *
+ * @note IDF 在 `esp_lcd_new_panel_io_dbi()` 里把 DCS/Gen 的写命令**全部设成 LP**
+ *       (`esp_lcd_panel_io_dbi.c:46-57`)。所以"保持默认" == 全 LP。
+ */
+typedef enum {
+	/**
+	 * 保持调用前的值, 一个都不改。
+	 *
+	 * 这是最安全的默认: 只想要 `cmd_ack` 行为、不想碰速度时用它。
+	 */
+	DSI_EXT_WR_SPEED_KEEP = 0,
+
+	/** 全部写命令 (DCS short 0/1, DCS long, Gen short 0/1/2, Gen long) 走 LP */
+	DSI_EXT_WR_SPEED_LP,
+
+	/** 全部写命令走 HS */
+	DSI_EXT_WR_SPEED_HS,
+} dsi_ext_wr_speed_t;
+
+/**
  * @brief 配置命令通道: ACK 行为 + 各类写的传输速度
  *
  * IDF 的 esp_lcd_new_panel_io_dbi() 会在这里打开 cmd_ack, 而 bus 层把超时全
@@ -64,9 +100,34 @@ void *dsi_ext_host(void);
  *
  * @param cmd_ack 命令是否要求 DSI 设备的 ACK
  * @param te_ack  TE 是否要求 ACK
- * @param all_lp  true = 所有写命令(含 DCS long)走 LP 模式, false = 保持 IDF 默认
+ * @param wr_speed 写命令速度, 见 @ref dsi_ext_wr_speed_t
+ *
+ * @note 只想关 cmd_ack、不碰速度时传 `DSI_EXT_WR_SPEED_KEEP`。
+ *       想与 IDF 默认保持一致时传 `DSI_EXT_WR_SPEED_LP` (两者当前效果相同,
+ *       但语义不同: 前者依赖"调用前是什么", 后者是显式写死)。
+ *
+ * @code
+ * // 只关 cmd_ack, 速度保持 IDF 设好的 LP
+ * dsi_ext_cmd_channel_config(false, false, DSI_EXT_WR_SPEED_KEEP);
+ *
+ * // 显式要求全 LP (与 IDF 默认一致, 幂等)
+ * dsi_ext_cmd_channel_config(false, false, DSI_EXT_WR_SPEED_LP);
+ * @endcode
  */
-esp_err_t dsi_ext_cmd_channel_config(bool cmd_ack, bool te_ack, bool all_lp);
+esp_err_t dsi_ext_cmd_channel_config(bool cmd_ack, bool te_ack,
+				     dsi_ext_wr_speed_t wr_speed);
+
+/**
+ * @brief 只关命令 ACK, 写速度一点不碰
+ *
+ * 等价于 `dsi_ext_cmd_channel_config(false, false, DSI_EXT_WR_SPEED_KEEP)`。
+ *
+ * **这是绝大多数工程真正需要的那个函数。** 归一化时"把直接调 hal 的
+ * `mipi_dsi_host_ll_enable_cmd_ack(host, false)` 换成组件调用"这个动作,
+ * 语义上只该关 ACK —— 一旦顺手动了写速度, 就是行为改动, 可能直接导致点不亮。
+ * 用这个函数就没有"第三个参数该传什么"的歧义。
+ */
+esp_err_t dsi_ext_disable_cmd_ack(void);
 
 /**
  * @brief 发送一条任意数据类型的 DSI 命令
@@ -223,6 +284,38 @@ void dsi_ext_rx_clear_fault(void);
  * @param force_hs true = 全程 HS, false = 回到 IDF 默认的 AUTO
  */
 esp_err_t dsi_ext_set_clock_lane(bool force_hs);
+
+/**
+ * @brief 关掉 video mode 下全部 LP 回退 (行消隐 / 场消隐 / 命令通道)
+ *
+ * IDF 在 dpi_panel_init() 里把这几段全开成"回 LP":
+ *
+ *   - lp_hbp_en / lp_hfp_en        行消隐回 LP
+ *   - lp_vsa/vbp/vfp/vact_en       场消隐回 LP
+ *   - lp_cmd_en                    命令通道走 LP
+ *
+ * 部分面板(尤其原厂例程针对 SSD2828 之类桥片调过的)要求 HS clock 全程连续,
+ * 每次回 LP 都会让面板重新锁定, 表现为画面抖动/斜线/闪烁。此时需要把三段全关。
+ *
+ * @note 必须在 `esp_lcd_panel_init()` **之后**调用 —— 它内部会重设这几段。
+ * @note 与 `dsi_ext_set_clock_lane(true)` **不等价**: 后者只改 clock lane 的
+ *       `auto_clklane_ctrl` 一位, 不动 data lane 的消隐行为。两者常一起用。
+ */
+esp_err_t dsi_ext_disable_lp_all(void);
+
+/** @brief 恢复 IDF 默认: 行消隐 / 场消隐 / 命令通道都允许回 LP */
+esp_err_t dsi_ext_enable_lp_all(void);
+
+/**
+ * @brief 关掉帧末的 BTA (bus turnaround) ack
+ *
+ * IDF 默认 `frame_bta_ack_en = 1`, 每帧结束强制一次低功耗总线转向, HS clock
+ * 在帧边界会中断。要求全程连续时钟的面板需要关掉它。
+ *
+ * @note 关掉之后 `esp_lcd_dpi_panel` 的 `on_refresh_done` 回调不会再触发
+ *       (它依赖这个 ack)。
+ */
+esp_err_t dsi_ext_disable_frame_ack(void);
 
 /**
  * @brief 设置 DPI 同步信号极性
